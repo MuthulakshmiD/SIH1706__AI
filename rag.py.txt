@@ -1,0 +1,27 @@
+from sentence_transformers import SentenceTransformer
+import faiss
+import numpy as np
+
+# ---------------- MODEL ----------------
+model = SentenceTransformer("all-MiniLM-L6-v2")
+
+# ---------------- KNOWLEDGE BASE ----------------
+docs = [
+    "Employees are allowed 12 casual leaves per year.",
+    "Password reset is done via IT support portal.",
+    "Company events are posted on employee dashboard.",
+    "Work from home is allowed twice a week with approval.",
+    "Medical leave requires proper documentation."
+]
+
+# ---------------- EMBEDDINGS ----------------
+doc_embeddings = model.encode(docs)
+
+index = faiss.IndexFlatL2(len(doc_embeddings[0]))
+index.add(np.array(doc_embeddings))
+
+# ---------------- SEARCH FUNCTION ----------------
+def get_answer(query):
+    query_vec = model.encode([query])
+    _, I = index.search(np.array(query_vec), 1)
+    return docs[I[0][0]]

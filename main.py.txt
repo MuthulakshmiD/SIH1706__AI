@@ -1,0 +1,34 @@
+from pydantic import BaseModel
+from rag import get_answer
+from auth import send_otp, verify_otp
+
+app = FastAPI(title="Enterprise AI Chatbot")
+
+# ---------------- REQUEST MODELS ----------------
+class Query(BaseModel):
+    text: str
+
+class OTPRequest(BaseModel):
+    email: str
+
+class OTPVerify(BaseModel):
+    email: str
+    otp: str
+
+# ---------------- CHAT ENDPOINT ----------------
+@app.post("/chat")
+def chat(q: Query):
+    response = get_answer(q.text)
+    return {"query": q.text, "response": response}
+
+# ---------------- OTP SEND ----------------
+@app.post("/send-otp")
+def otp(req: OTPRequest):
+    otp_value = send_otp(req.email)
+    return {"message": "OTP sent", "otp_demo": otp_value}
+
+# ---------------- OTP VERIFY ----------------
+@app.post("/verify-otp")
+def verify(req: OTPVerify):
+    status = verify_otp(req.email, req.otp)
+    return {"status": status}

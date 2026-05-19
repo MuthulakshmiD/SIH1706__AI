@@ -1,0 +1,16 @@
+import random
+
+otp_store = {}
+
+# ---------------- SEND OTP ----------------
+def send_otp(email):
+    otp = str(random.randint(100000, 999999))
+    otp_store[email] = otp
+    print("OTP GENERATED:", otp)  # for demo
+    return otp
+
+# ---------------- VERIFY OTP ----------------
+def verify_otp(email, otp):
+    if email in otp_store and otp_store[email] == otp:
+        return "Login Successful"
+    return "Invalid OTP"
