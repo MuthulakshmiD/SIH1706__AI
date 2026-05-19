@@ -32,46 +32,57 @@ To design and implement an AI-powered enterprise chatbot that improves organizat
 ---
 
 ## ⚙️ System Architecture
+  ```
+                 ┌────────────────────────────┐
+                 │         USER               │
+                 │ (Employee / Admin)        │
+                 └────────────┬───────────────┘
+                              │
+                              ▼
+                 ┌────────────────────────────┐
+                 │     FRONTEND UI           │
+                 │ (Web / Chat Interface)    │
+                 └────────────┬───────────────┘
+                              │
+                              ▼
+                 ┌────────────────────────────┐
+                 │   AUTHENTICATION LAYER    │
+                 │   (Email OTP - 2FA)       │
+                 └────────────┬───────────────┘
+                              │
+                              ▼
+                 ┌────────────────────────────┐
+                 │      FASTAPI SERVER       │
+                 │   (Backend Controller)    │
+                 └────────────┬───────────────┘
+                              │
+        ┌─────────────────────┼─────────────────────┐
+        ▼                     ▼                     ▼
+┌────────────────┐  ┌──────────────────┐  ┌────────────────────┐
+│ NLP ENGINE     │  │ DOCUMENT MODULE  │  │ CONTENT FILTER     │
+│ Intent + NER   │  │ PDF/Text Parser  │  │ Profanity Check    │
+└───────┬────────┘  └────────┬─────────┘  └─────────┬──────────┘
+        │                   │                      │
+        ▼                   ▼                      ▼
+┌────────────────────────────────────────────────────────────┐
+│                KNOWLEDGE BASE (RAG SYSTEM)                │
+│        Vector DB (FAISS + Sentence Embeddings)            │
+└──────────────────────────┬─────────────────────────────────┘
+                           │
+                           ▼
+              ┌──────────────────────────┐
+              │ RESPONSE GENERATOR      │
+              │ (Retrieval + Rules)     │
+              └────────────┬─────────────┘
+                           │
+                           ▼
+              ┌──────────────────────────┐
+              │      FINAL OUTPUT        │
+              │ (Chatbot Response)       │
+              └──────────────────────────┘
 
 
-                +----------------------+
-                |     User Login       |
-                |   (Email 2FA OTP)    |
-                +----------+-----------+
-                           |
-                           v
-                +----------------------+
-                |  Chatbot Frontend    |
-                +----------+-----------+
-                           |
-                           v
-                +----------------------+
-                |  NLP Processing      |
-                | Intent + Entity NLP  |
-                +----------+-----------+
-                           |
-          +----------------+----------------+
-          |                                 |
-          v                                 v
-+---------------------+        +----------------------+
-| Knowledge Base      |        | Document Processing  |
-| (Vector DB FAISS)   |        | Summarization + OCR  |
-+----------+----------+        +----------+-----------+
-           |                               |
-           +---------------+---------------+
-                           v
-                +----------------------+
-                | Response Generator   |
-                | (LLM / Rules Engine) |
-                +----------+-----------+
-                           |
-                           v
-                +----------------------+
-                |   Final Answer       |
-                +----------------------+
-
----
-
+```
 ## 🧾 Methodology / Procedure
 
 ### 1. Data Collection
@@ -134,67 +145,116 @@ To design and implement an AI-powered enterprise chatbot that improves organizat
 
 ---
 
-## 🚀 Backend (FastAPI Chatbot)
+### INSTALL REQUIREMENTS
+```pip install fastapi uvicorn sentence-transformers faiss-cpu numpy```
 
-```python
-from fastapi import FastAPI
+### Project structure
+```
+chatbot/
+│
+├── main.py
+├── rag.py
+├── auth.py
+└── requirements.txt
+```
+
+
+## MAIN FASTAPI APP (main.py)
+
+```from fastapi import FastAPI
 from pydantic import BaseModel
+from rag import get_answer
+from auth import send_otp, verify_otp
 
-app = FastAPI()
+app = FastAPI(title="Enterprise AI Chatbot")
 
-knowledge_base = {
-    "leave policy": "Employees are entitled to 12 casual leaves per year.",
-    "it support": "Reset password using IT portal or contact helpdesk."
-}
-
+# ---------------- REQUEST MODELS ----------------
 class Query(BaseModel):
     text: str
 
-def get_response(query: str):
-    query = query.lower()
-    for key in knowledge_base:
-        if key in query:
-            return knowledge_base[key]
-    return "Sorry, no relevant information found."
+class OTPRequest(BaseModel):
+    email: str
 
+class OTPVerify(BaseModel):
+    email: str
+    otp: str
+
+# ---------------- CHAT ENDPOINT ----------------
 @app.post("/chat")
 def chat(q: Query):
-    return {"response": get_response(q.text)}
+    response = get_answer(q.text)
+    return {"query": q.text, "response": response}
+
+# ---------------- OTP SEND ----------------
+@app.post("/send-otp")
+def otp(req: OTPRequest):
+    otp_value = send_otp(req.email)
+    return {"message": "OTP sent", "otp_demo": otp_value}
+
+# ---------------- OTP VERIFY ----------------
+@app.post("/verify-otp")
+def verify(req: OTPVerify):
+    status = verify_otp(req.email, req.otp)
+    return {"status": status}
 ```
 
-### 2FA Email OTP System
+### AI CHAT ENGINE (rag.py)
+```
+from sentence_transformers import SentenceTransformer
+import faiss
+import numpy as np
+
+# ---------------- MODEL ----------------
+model = SentenceTransformer("all-MiniLM-L6-v2")
+
+# ---------------- KNOWLEDGE BASE ----------------
+docs = [
+    "Employees are allowed 12 casual leaves per year.",
+    "Password reset is done via IT support portal.",
+    "Company events are posted on employee dashboard.",
+    "Work from home is allowed twice a week with approval.",
+    "Medical leave requires proper documentation."
+]
+
+# ---------------- EMBEDDINGS ----------------
+doc_embeddings = model.encode(docs)
+
+index = faiss.IndexFlatL2(len(doc_embeddings[0]))
+index.add(np.array(doc_embeddings))
+
+# ---------------- SEARCH FUNCTION ----------------
+def get_answer(query):
+    query_vec = model.encode([query])
+    _, I = index.search(np.array(query_vec), 1)
+    return docs[I[0][0]]
+```
+
+### OTP AUTH SYSTEM (auth.py)
+
 ```
 import random
 
 otp_store = {}
 
-def generate_otp():
-    return random.randint(100000, 999999)
-
+# ---------------- SEND OTP ----------------
 def send_otp(email):
-    otp = generate_otp()
+    otp = str(random.randint(100000, 999999))
     otp_store[email] = otp
-    print(f"OTP sent to {email}: {otp}")
+    print("OTP GENERATED:", otp)  # for demo
+    return otp
+
+# ---------------- VERIFY OTP ----------------
+def verify_otp(email, otp):
+    if email in otp_store and otp_store[email] == otp:
+        return "Login Successful"
+    return "Invalid OTP"
 ```
 
-### Document Summarization
-
+### Run server 
 ```
-from transformers import pipeline
-
-summarizer = pipeline("summarization")
-
-def summarize_text(text):
-    return summarizer(text, max_length=120, min_length=40, do_sample=False)
-🚫 Content Filtering
-bad_words = ["abuse1", "abuse2", "badword"]
-
-def filter_text(text):
-    for word in bad_words:
-        if word in text.lower():
-            return "⚠️ Inappropriate language detected!"
-    return text
+uvicorn main:app --reload
 ```
+
 ### 📤 Sample Inputs & Outputs
 Example 1
 
